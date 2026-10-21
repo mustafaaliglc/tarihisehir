@@ -10,12 +10,11 @@ import { CityData, TURKEY_CITIES } from './data/turkeyData';
 import { Compass } from 'lucide-react';
 
 export default function App() {
-  // Directly start in fullscreen 3D game for Istanbul / Galata Tower
-  const defaultCity = TURKEY_CITIES.find((c) => c.id === 'istanbul') || TURKEY_CITIES[0];
-  const [playingCity, setPlayingCity] = useState<CityData | null>(defaultCity);
+  // Start on the interactive Turkey map view; launches 3D game when student selects a city
+  const [playingCity, setPlayingCity] = useState<CityData | null>(null);
 
   // Earned badges tracking
-  const [earnedBadges, setEarnedBadges] = useState<string[]>(['İstanbul Muhafızı']);
+  const [earnedBadges, setEarnedBadges] = useState<string[]>([]);
 
   const handleBadgeEarned = (badge: string) => {
     if (!earnedBadges.includes(badge)) {
