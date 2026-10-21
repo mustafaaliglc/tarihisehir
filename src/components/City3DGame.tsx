@@ -4,12 +4,14 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { CityData } from '../data/turkeyData';
 import { soundFX } from '../utils/soundEffects';
 import { createStoneBlockTexture, createCobblestoneTexture, createLeadRoofTexture } from '../utils/proceduralTextures';
-import { Trophy, Compass, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap, RefreshCw, Award, Sparkles, HelpCircle, ArrowLeft as BackIcon, Info, MapPin } from 'lucide-react';
+import { Trophy, Compass, ArrowUp, ArrowDown, ArrowLeft, ArrowRight, Zap, RefreshCw, Award, Sparkles, HelpCircle, ArrowLeft as BackIcon, Info, MapPin, Moon, Sun } from 'lucide-react';
 
 interface City3DGameProps {
   city: CityData;
   onBadgeEarned: (badge: string) => void;
   onClose: () => void;
+  isDarkAmbiance?: boolean;
+  onToggleDark?: () => void;
 }
 
 interface RelicItem {
@@ -21,8 +23,38 @@ interface RelicItem {
   collected: boolean;
 }
 
-export const City3DGame: React.FC<City3DGameProps> = ({ city, onBadgeEarned, onClose }) => {
+export const City3DGame: React.FC<City3DGameProps> = ({
+  city,
+  onBadgeEarned,
+  onClose,
+  isDarkAmbiance = false,
+  onToggleDark,
+}) => {
   const mountRef = useRef<HTMLDivElement>(null);
+
+  // Ambiance Black / Night Mode State
+  const [isNightMode, setIsNightMode] = useState<boolean>(isDarkAmbiance);
+
+  useEffect(() => {
+    if (isDarkAmbiance !== undefined) {
+      setIsNightMode(isDarkAmbiance);
+    }
+  }, [isDarkAmbiance]);
+
+  const toggleNightMode = () => {
+    setIsNightMode((prev) => {
+      const next = !prev;
+      if (onToggleDark) onToggleDark();
+      return next;
+    });
+  };
+
+  // References for Three.js scene & lights dynamic ambiance update
+  const sceneRef = useRef<THREE.Scene | null>(null);
+  const hemiLightRef = useRef<THREE.HemisphereLight | null>(null);
+  const keyLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const fillLightRef = useRef<THREE.DirectionalLight | null>(null);
+  const nightGroupRef = useRef<THREE.Group | null>(null);
   
   // Game states
   const [relicsCount, setRelicsCount] = useState<number>(0);
@@ -120,6 +152,63 @@ export const City3DGame: React.FC<City3DGameProps> = ({ city, onBadgeEarned, onC
       });
   }, [activeLandmark, city]);
 
+  // Sync Ambiance with Three.js Scene, Sky and Lights
+  useEffect(() => {
+    const scene = sceneRef.current;
+    const hemi = hemiLightRef.current;
+    const key = keyLightRef.current;
+    const fill = fillLightRef.current;
+    const nightGroup = nightGroupRef.current;
+    if (!scene) return;
+
+    if (isNightMode) {
+      scene.background = new THREE.Color(0x060913);
+      if (scene.fog) {
+        scene.fog.color = new THREE.Color(0x060913);
+        (scene.fog as THREE.FogExp2).density = 0.014;
+      }
+      if (hemi) {
+        hemi.color.setHex(0x1e293b);
+        hemi.groundColor.setHex(0x0a0f1d);
+        hemi.intensity = 0.55;
+      }
+      if (key) {
+        key.color.setHex(0x8ab4f8); // Moonlight
+        key.intensity = 0.9;
+      }
+      if (fill) {
+        fill.color.setHex(0x274060);
+        fill.intensity = 0.35;
+      }
+      if (nightGroup) {
+        nightGroup.visible = true;
+      }
+    } else {
+      const dayColor = archetype === 'galata' ? 0xd0e2ec : archetype === 'balloon' ? 0xffecd2 : 0xf1f5f9;
+      scene.background = new THREE.Color(dayColor);
+      if (scene.fog) {
+        scene.fog.color = new THREE.Color(dayColor);
+        (scene.fog as THREE.FogExp2).density = 0.012;
+      }
+      if (hemi) {
+        hemi.color.setHex(0xffffff);
+        hemi.groundColor.setHex(0xc8d6e5);
+        hemi.intensity = 0.9;
+      }
+      if (key) {
+        key.color.setHex(0xfff3d6);
+        key.intensity = 1.6;
+      }
+      if (fill) {
+        fill.color.setHex(0xa5c4d4);
+        fill.intensity = 0.55;
+      }
+      if (nightGroup) {
+        nightGroup.visible = false;
+      }
+    }
+  }, [isNightMode, archetype]);
+
   useEffect(() => {
     const container = mountRef.current;
     if (!container) return;
@@ -155,8 +244,11 @@ export const City3DGame: React.FC<City3DGameProps> = ({ city, onBadgeEarned, onC
 
     // Scene & Camera
     const scene = new THREE.Scene();
-    scene.background = new THREE.Color(archetype === 'galata' ? 0xd0e2ec : archetype === 'balloon' ? 0xffecd2 : 0xf1f5f9);
-    scene.fog = new THREE.FogExp2(archetype === 'galata' ? 0xd0e2ec : archetype === 'balloon' ? 0xffecd2 : 0xf1f5f9, 0.012);
+    sceneRef.current = scene;
+
+    const dayColor = archetype === 'galata' ? 0xd0e2ec : archetype === 'balloon' ? 0xffecd2 : 0xf1f5f9;
+    scene.background = new THREE.Color(isNightMode ? 0x060913 : dayColor);
+    scene.fog = new THREE.FogExp2(isNightMode ? 0x060913 : dayColor, isNightMode ? 0.014 : 0.012);
 
     const camera = new THREE.PerspectiveCamera(68, window.innerWidth / window.innerHeight, 0.1, 260);
 
@@ -166,10 +258,18 @@ export const City3DGame: React.FC<City3DGameProps> = ({ city, onBadgeEarned, onC
     pmremGenerator.dispose();
 
     // Lighting Rig
-    const hemiLight = new THREE.HemisphereLight(0xffffff, 0xc8d6e5, 0.9);
+    const hemiLight = new THREE.HemisphereLight(
+      isNightMode ? 0x1e293b : 0xffffff,
+      isNightMode ? 0x0a0f1d : 0xc8d6e5,
+      isNightMode ? 0.55 : 0.9
+    );
     scene.add(hemiLight);
+    hemiLightRef.current = hemiLight;
 
-    const keyLight = new THREE.DirectionalLight(0xfff3d6, 1.6);
+    const keyLight = new THREE.DirectionalLight(
+      isNightMode ? 0x8ab4f8 : 0xfff3d6,
+      isNightMode ? 0.9 : 1.6
+    );
     keyLight.position.set(32, 55, 28);
     keyLight.castShadow = !isSoftwareGl;
     keyLight.shadow.mapSize.width = 1024;
@@ -180,10 +280,61 @@ export const City3DGame: React.FC<City3DGameProps> = ({ city, onBadgeEarned, onC
     keyLight.shadow.camera.top = 55;
     keyLight.shadow.camera.bottom = -10;
     scene.add(keyLight);
+    keyLightRef.current = keyLight;
 
-    const fillLight = new THREE.DirectionalLight(0xa5c4d4, 0.55);
+    const fillLight = new THREE.DirectionalLight(
+      isNightMode ? 0x274060 : 0xa5c4d4,
+      isNightMode ? 0.35 : 0.55
+    );
     fillLight.position.set(-28, 25, -28);
     scene.add(fillLight);
+    fillLightRef.current = fillLight;
+
+    // Create night ambiance group (stars + warm golden floodlights on tower)
+    const nightGroup = new THREE.Group();
+
+    // 1. Twinkling Stars
+    const starCount = 1200;
+    const starPositions = new Float32Array(starCount * 3);
+    for (let i = 0; i < starCount; i++) {
+      const radius = 170 + Math.random() * 40;
+      const theta = Math.random() * Math.PI * 2;
+      const phi = Math.acos(Math.random() * 0.92);
+      starPositions[i * 3] = radius * Math.sin(phi) * Math.cos(theta);
+      starPositions[i * 3 + 1] = Math.max(16, radius * Math.cos(phi));
+      starPositions[i * 3 + 2] = radius * Math.sin(phi) * Math.sin(theta);
+    }
+    const starGeo = new THREE.BufferGeometry();
+    starGeo.setAttribute('position', new THREE.BufferAttribute(starPositions, 3));
+    const starMat = new THREE.PointsMaterial({
+      color: 0xffffff,
+      size: 1.2,
+      transparent: true,
+      opacity: 0.9,
+    });
+    const starPoints = new THREE.Points(starGeo, starMat);
+    nightGroup.add(starPoints);
+
+    // 2. Warm golden floodlights for night ambiance (Galata Tower spotlighting)
+    const spotSouth = new THREE.PointLight(0xffb347, 3.2, 50);
+    spotSouth.position.set(0, 3, 11);
+    nightGroup.add(spotSouth);
+
+    const spotNorth = new THREE.PointLight(0xff9f1c, 2.8, 50);
+    spotNorth.position.set(0, 3, -11);
+    nightGroup.add(spotNorth);
+
+    const spotEast = new THREE.PointLight(0xffa726, 2.8, 50);
+    spotEast.position.set(11, 3, 0);
+    nightGroup.add(spotEast);
+
+    const spotWest = new THREE.PointLight(0xffa726, 2.8, 50);
+    spotWest.position.set(-11, 3, 0);
+    nightGroup.add(spotWest);
+
+    nightGroup.visible = isNightMode;
+    scene.add(nightGroup);
+    nightGroupRef.current = nightGroup;
 
     // Landmark Parent Group
     const landmarkGroup = new THREE.Group();
@@ -996,8 +1147,31 @@ export const City3DGame: React.FC<City3DGameProps> = ({ city, onBadgeEarned, onC
         </div>
       </div>
 
-      {/* Clean Sleek HUD: Top-Right (Counters & Info button) */}
+      {/* Clean Sleek HUD: Top-Right (Counters, Ambiance Toggle & Info button) */}
       <div className="absolute top-4 right-4 z-20 flex items-center gap-2">
+        {/* Ambiyansı Siyaha Döndürme Düğmesi (Sağ Üstte) */}
+        <button
+          onClick={toggleNightMode}
+          className={`flex items-center gap-1.5 px-3 py-2 rounded-2xl font-black text-xs shadow-xl transition-all hover:scale-105 cursor-pointer border backdrop-blur-md ${
+            isNightMode
+              ? 'bg-slate-900/90 text-amber-300 border-amber-400/50 shadow-amber-500/20'
+              : 'bg-slate-950/85 text-indigo-200 border-white/20 hover:bg-slate-900'
+          }`}
+          title={isNightMode ? 'Gündüz Ambiyansına Dön' : 'Ambiyansı Siyaha Döndür (Gece Modu)'}
+        >
+          {isNightMode ? (
+            <>
+              <Sun className="w-4 h-4 text-amber-400" />
+              <span className="hidden sm:inline">Gündüz</span>
+            </>
+          ) : (
+            <>
+              <Moon className="w-4 h-4 text-indigo-400" />
+              <span className="hidden sm:inline">Siyah Ambiyans</span>
+            </>
+          )}
+        </button>
+
         <div className="flex items-center gap-2 bg-slate-950/85 backdrop-blur-md border border-white/20 px-3.5 py-1.5 rounded-2xl text-white shadow-xl">
           <div className="text-right">
             <span className="text-[10px] text-slate-400 block font-semibold leading-none">Emanetler</span>
